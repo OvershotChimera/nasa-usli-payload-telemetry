@@ -29,7 +29,11 @@ on a laptop or phone nearby to read logs — so instead of just logging data to
 SD, it announces a summary out loud over the radio on landing, audible to
 anyone with a receiver tuned to the frequency.
 
-**Demo:** [field recording from the launch site](https://youtu.be/vBzKQt7xYfI) —
+## DEMO VIDEO
+
+[![field recording from the launch site](https://img.youtube.com/vi/vBzKQt7xYfI/hqdefault.jpg)](https://youtu.be/vBzKQt7xYfI)
+
+—
 receiver picking up the audio telemetry broadcast. Audio's rough (wind, rocket
 noise in the background), apologies :).
 
