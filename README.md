@@ -24,10 +24,14 @@ telemetry and post-landing audio broadcast system:
   audio playback helpers built on top of the ESP8266Audio library, routed
   through the TWR's radio transmit path.
 
-**Why:** the payload needed to report 8 flight parameters after landing without relying
-on a laptop or phone nearby to read logs — so instead of just logging data to the
+**Why:** the payload needed to report flight data after landing without relying
+on a laptop or phone nearby to read logs — so instead of just logging data to
 SD, it announces a summary out loud over the radio on landing, audible to
 anyone with a receiver tuned to the frequency.
+
+**Demo:** [field recording from the launch site](https://youtu.be/vBzKQt7xYfI) —
+receiver picking up the audio telemetry broadcast. Audio's rough (wind, rocket
+noise in the background), apologies :).
 
 **Stack:** C++ (Arduino/ESP32), barometric + GPS sensor fusion, I2S audio
 output, SA868 radio module control.
