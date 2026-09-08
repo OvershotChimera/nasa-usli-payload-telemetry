@@ -8,7 +8,11 @@
  * * Currently, SA868 only supports NiceRF factory AT firmware and does not support OpenRTX firmware for the time being.
  * * Menu inspired by https://giltesa.com/2020/09/07/menu-grafico-para-pantalla-oled-en-arduino
  */
+//#define U8X8_DO_NOT_SET_WIRE_CLOCK
+//#include <LibAPRSesp.h>
 
+
+#include <U8x8lib.h>
 #include <U8g2lib.h>
 #include <Rotary.h>
 #include <TinyGPS++.h>
@@ -22,16 +26,61 @@
 #include <Adafruit_NeoPixel.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+#include <Adafruit_BMP280.h>
+#include <Adafruit_BMP3XX.h>
+#include <Adafruit_DPS310.h>
+#include <Adafruit_ADXL345_U.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <ArduinoOTA.h>
 #include <SPIFFS.h>
 #include "Constants.h"
 #include "WebIndex.h"
+#include <SD.h>
+#include <driver/i2s.h>
+// ESP8266Audio is not a mainline branch and uses SoftRF modified libraries.
+#include <AudioGeneratorWAV.h>
+#include <AudioOutputI2S.h>
+#include <AudioFileSourceSD.h>
 
 
 #define DEBUG_PORT Serial    // Output debugging information
 #include "LilyGo_TWR.h"
+#define WAV_FILE_PATH           "/POST.wav"
+#define WAV_FILE_PATH2          "/TEST.wav"
+#define WAV_FILE_PATH3          "/TESTING1.wav"
+#define WAV_ZERO                "/NUMBERS/ZERO.wav"
+#define WAV_ONE                 "/NUMBERS/ONE.wav"
+#define WAV_TWO                 "/NUMBERS/TWO.wav"
+#define WAV_THREE               "/NUMBERS/THREE.wav"
+#define WAV_FOUR                "/NUMBERS/FOUR.wav"
+#define WAV_FIVE                "/NUMBERS/FIVE.wav"
+#define WAV_SIX                 "/NUMBERS/SIX.wav"
+#define WAV_SEVEN               "/NUMBERS/SEVEN.wav"
+#define WAV_EIGHT               "/NUMBERS/EIGHT.wav"
+#define WAV_NINE                "/NUMBERS/NINE.wav"
+#define WAV_MPS                "/UNITS/METPERSEC.wav"
+#define WAV_MET                 "/UNITS/METERS.wav"
+#define WAV_DEG                 "/UNITS/DEGREES.wav"
+#define WAV_PERC                "/UNITS/P.wav"
+#define WAV_TIME                "/UNITS/PM.wav"
+#define WAV_CALLSIGN            "/DATA/CALLSIGN.wav"
+#define WAV_TEMP                "/DATA/TEMPERATURE.wav"
+#define WAV_ALT                 "/DATA/APOGEE.wav"
+#define WAV_TOL                 "/DATA/TOLTA2.wav"
+#define WAV_CREW                "/DATA/STEMCREW.wav"
+#define WAV_MAXVELO             "/DATA/MAXVELO.wav"
+#define WAV_BATPERC             "/DATA/BATPERC.wav"
+#define WAV_ALEXPERC            "/UNITS/ALEXPERC.wav"
+#define WAV_ALIPERC             "/UNITS/PERC.wav"
+#define WAV_LAT                 "/UNITS/LAT.wav"
+#define WAV_LONG                "/UNITS/LONG.wav"
+
+
+
+
+
+
 
 using namespace ace_button;
 
@@ -46,15 +95,10 @@ enum Button {
 #define U8G2_HOR_ALIGN_RIGHT(t)     (u8g2.getDisplayWidth()  -  u8g2.getUTF8Width(t))
 
 
-DECLARE_DEMO(demoLed);
-DECLARE_DEMO(demoSpeaker);
-DECLARE_DEMO(demoOled);
-DECLARE_DEMO(demoButton);
-DECLARE_DEMO(demoMic);
-DECLARE_DEMO(demoAlarm);
-DECLARE_DEMO(demoSensor);
+
+DECLARE_DEMO(demoVelocitySensor);
+DECLARE_DEMO(demoFlightTelemetry);
 DECLARE_DEMO(demoGPS);
-DECLARE_DEMO(demoSDCard);
 DECLARE_DEMO(demoPMU);
 DECLARE_DEMO(demoTransFreq);
 DECLARE_DEMO(demoRecvFreq);
@@ -62,10 +106,10 @@ DECLARE_DEMO(demoSquelchLevel);
 DECLARE_DEMO(demoPowerLevel);
 DECLARE_DEMO(demoFilter);
 DECLARE_DEMO(demoBLE);
-DECLARE_DEMO(demoWiFi);
-DECLARE_DEMO(demoSetting);
+DECLARE_DEMO(demoSentData);
 DECLARE_DEMO(demoDevInfo);
 DECLARE_DEMO(drawError);
+DECLARE_DEMO(broadcastAudioTelemetry);
 
 
 uint32_t readRotary(uint32_t cur, uint32_t minOut, uint32_t maxOut, uint32_t steps = 1 );
@@ -85,65 +129,30 @@ struct demo_struct {
     //*         XBM ICON,
     //*         Callback,
     //* },
+
     {
-        "LED",
-        "PIXELS RGB LED",
-        { 0x00, 0x00, 0xe0, 0x01, 0xe0, 0x01, 0x60, 0x3f, 0x7f, 0x7f, 0x7f, 0xc1, 0x60, 0x81, 0x60, 0x8f, 0x60, 0x8f, 0x60, 0x81, 0x7f, 0xc1, 0x7f, 0x7f, 0x60, 0x3f, 0xe0, 0x01, 0xe0, 0x01, 0x00, 0x00 },
-        demoLed
-    },
-    {
-        "SPEAKER",
-        "PLAYING GAME MELODIES",
-        { 0x00, 0x00, 0x80, 0x01, 0xc0, 0x01, 0xe0, 0x01, 0xb0, 0x11, 0x9e, 0x21, 0x8e, 0x45, 0x86, 0x49, 0x86, 0x49, 0x8e, 0x45, 0x9e, 0x21, 0xb0, 0x11, 0xe0, 0x01, 0xc0, 0x01, 0x80, 0x01, 0x00, 0x00 },
-        demoSpeaker
-    },
-    {
-        "OLED",
-        "BRIGHTNESS SETTING",
-        { 0x00, 0x00, 0x00, 0x00, 0xfe, 0x7f, 0xfe, 0x7f, 0x06, 0x60, 0x06, 0x60, 0x06, 0x60, 0x06, 0x60, 0x06, 0x60, 0xfe, 0x7f, 0xfe, 0x7f, 0x80, 0x01, 0x80, 0x01, 0xf0, 0x0f, 0xf0, 0x0f, 0x00, 0x00 },
-        demoOled
-    },
-    {
-        "BUTTON",
-        "COUNTING BUTTON PRESSES",
-        { 0x00, 0x00, 0xe0, 0x07, 0xe0, 0x07, 0xe0, 0x07, 0xe0, 0x07, 0xfe, 0x7f, 0xfe, 0x7f, 0x06, 0x60, 0x06, 0x60, 0x36, 0x6c, 0xfe, 0x7f, 0xfe, 0x7f, 0x30, 0x0c, 0x30, 0x0c, 0x30, 0x0c, 0x00, 0x00 },
-        demoButton
-    },
-    {
-        "ALARM",
-        "SEND ALERT",
-        { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xcf, 0x7b, 0xdb, 0xdb, 0x71, 0x8e, 0x63, 0x1e, 0x6f, 0x7e, 0x7e, 0xf6, 0x78, 0xc6, 0x71, 0x8e, 0xdb, 0xdb, 0xde, 0xf3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-        demoAlarm
-    },
-    {
-        "MICROPHONE",
-        "MICROPHONE TEST",
+        "Velocity Sensor",
+        "EXTERNAL SENSOR",
         { 0x00, 0x00, 0xc0, 0x03, 0xe0, 0x07, 0x60, 0x06, 0x60, 0x06, 0x60, 0x06, 0x60, 0x06, 0xec, 0x37, 0xcc, 0x33, 0x1c, 0x38, 0xf8, 0x1f, 0xe0, 0x07, 0x80, 0x01, 0x80, 0x01, 0xe0, 0x07, 0xf0, 0x0f },
-        demoMic
-    },
+        demoVelocitySensor
+    }, 
     {
-        "BME280 SENSOR",
+        "BMP390 SENSOR",
         "EXTERNAL SENSOR",
         { 0xe0, 0x00, 0xf0, 0x01, 0x18, 0x03, 0x58, 0x7b, 0x58, 0x03, 0x58, 0x03, 0x58, 0x7b, 0x58, 0x03, 0x58, 0x03, 0x4c, 0x66, 0xe6, 0x0c, 0xf6, 0x0d, 0xe6, 0x6c, 0x0c, 0x06, 0xf8, 0x03, 0xf0, 0x01 },
-        demoSensor
-    },
-    {
-        "GPS",
-        "LOCATION INFORMATION",
-        {0xe0, 0x07, 0xf0, 0x0f, 0x38, 0x1c, 0xcc, 0x33, 0xec, 0x37, 0x6e, 0x76, 0x26, 0x64, 0x66, 0x66, 0xee, 0x77, 0xcc, 0x33, 0x18, 0x18, 0x38, 0x1c, 0x70, 0x0e, 0xe0, 0x07, 0xc0, 0x03, 0x80, 0x01},
-        demoGPS
-    },
-    {
-        "STORAGE",
-        "SD CARD INFORMATION",
-        {0x00, 0x00, 0xc0, 0x1f, 0xe0, 0x3f, 0x70, 0x35, 0x78, 0x35, 0xfc, 0x3f, 0xfc, 0x3f, 0xfc, 0x3f, 0xfc, 0x3f, 0xfc, 0x3f, 0xfc, 0x3f, 0xfc, 0x3f, 0xfc, 0x3f, 0xfc, 0x3f, 0xf8, 0x1f, 0x00, 0x00},
-        demoSDCard
+        demoFlightTelemetry
     },
     {
         "POWER",
         "POWER MANAGEMENT",
         {0x1e, 0x7a, 0x1f, 0xfb, 0x83, 0xc3, 0xc3, 0xc1, 0xe3, 0xc1, 0xa0, 0x01, 0x90, 0x1f, 0x18, 0x10, 0xfc, 0x09, 0x80, 0x0d, 0x80, 0x07, 0x83, 0xc2, 0x83, 0xc3, 0xc3, 0xc1, 0xdf, 0xf8, 0xde, 0x78},
         demoPMU
+    },
+    {
+        "GPS",
+        "LOCATION INFORMATION",
+        {0xe0, 0x07, 0xf0, 0x0f, 0x38, 0x1c, 0xcc, 0x33, 0xec, 0x37, 0x6e, 0x76, 0x26, 0x64, 0x66, 0x66, 0xee, 0x77, 0xcc, 0x33, 0x18, 0x18, 0x38, 0x1c, 0x70, 0x0e, 0xe0, 0x07, 0xc0, 0x03, 0x80, 0x01},
+        demoGPS
     },
     {
         "TRANS FREQ",
@@ -178,23 +187,11 @@ struct demo_struct {
         demoFilter
     },
     {
-        "BLUETOOTH",
-        "BLUETOOTH CONFIGURE",
+        "WAV PLAY",
+        "PLAYER WAV",
         {0x80, 0x01, 0x80, 0x03, 0x80, 0x07, 0x98, 0x0f, 0xb8, 0x1d, 0xf0, 0x0f, 0xe0, 0x07, 0xc0, 0x03, 0xc0, 0x03, 0xe0, 0x07, 0xf0, 0x0f, 0xb8, 0x1d, 0x98, 0x0f, 0x80, 0x07, 0x80, 0x03, 0x80, 0x01},
-        demoBLE
-    },
-    {
-        "WIFI",
-        "WIFI CONFIGURE",
-        {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x0f, 0xfc, 0x3f, 0xfe, 0x7f, 0x1f, 0xf8, 0xe6, 0x67, 0xf0, 0x0f, 0xf8, 0x1f, 0x30, 0x0c, 0xc0, 0x03, 0xc0, 0x03, 0xc0, 0x01, 0x00, 0x00, 0x00, 0x00},
-        demoWiFi
-    },
-    {
-        "SETTING",
-        "SYSTEM SETTING",
-        {0x00, 0x00, 0xc0, 0x03, 0xc0, 0x03, 0xfc, 0x3f, 0x7c, 0x3e, 0xc6, 0x63, 0xee, 0x77, 0x6c, 0x36, 0x6c, 0x36, 0xee, 0x77, 0xc6, 0x63, 0x7c, 0x3e, 0xfc, 0x3f, 0xc0, 0x03, 0xc0, 0x03, 0x00, 0x00},
-        demoSetting
-    },
+        broadcastAudioTelemetry
+    }, 
     {
         "INFO",
         "DEVICE INFO",
@@ -212,11 +209,30 @@ struct RotarySetting {
     uint32_t steps;
 };
 
+AudioGeneratorWAV    *wav;
+AudioGeneratorWAV    *wav2;
+AudioFileSourceSD    *file;
+AudioFileSourceSD    *file2;
+AudioFileSourceSD    *file3;
+AudioFileSourceSD    *ZEROF;
+AudioFileSourceSD    *ONEF;
+AudioFileSourceSD    *TWOF;
+AudioFileSourceSD    *THREEF;
+AudioFileSourceSD    *FOURF;
+AudioFileSourceSD    *FIVEF;
+AudioFileSourceSD    *SIXF;
+AudioFileSourceSD    *SEVENF;
+AudioFileSourceSD    *EIGHTF;
+AudioFileSourceSD    *NINEF;
+AudioOutputI2S       *out;
 AsyncWebServer                      server(80);
 U8G2_SH1106_128X64_NONAME_F_HW_I2C  u8g2(U8G2_R0, U8X8_PIN_NONE);
 Rotary                              rotary = Rotary(ENCODER_A_PIN, ENCODER_B_PIN);
 TinyGPSPlus                         gps;
-Adafruit_BME280                     bme;
+Adafruit_BMP280                     bme;
+Adafruit_BMP3XX                     bmp390;
+Adafruit_DPS310                     dps310;
+Adafruit_ADXL345_Unified            adxl345 = Adafruit_ADXL345_Unified(12345);     
 AceButton                           buttons[3];
 Button                              state = Unknown;
 Adafruit_NeoPixel                   strip = Adafruit_NeoPixel(1, PIXELS_PIN, NEO_GRB + NEO_KHZ800);
@@ -225,8 +241,9 @@ QueueHandle_t                       rotarySetting;
 TaskHandle_t                        rotaryHandler;
 bool                                inMenu = true;
 bool                                isBMEOnline = false;
-const char                          *ssid = "T-TWR";
-const char                          *password = "12345678";
+int                                 counter = -2;
+
+const unsigned long MID = 4000;
 
 const uint8_t                       buttonPins [] = {
     ENCODER_OK_PIN,
@@ -355,6 +372,7 @@ void handleEvent(AceButton *button, uint8_t eventType, uint8_t buttonState)
             if (!inMenu) {
                 state = LongPress;
                 DBG("LongPress");
+
             } else {
                 uint8_t v = radio.getVolume();
                 radio.setVolume(--v);
@@ -369,18 +387,9 @@ void handleEvent(AceButton *button, uint8_t eventType, uint8_t buttonState)
     }
 }
 
-bool setupSDCard()
-{
-    if (SD.begin(SD_CS, SPI)) {
-        uint8_t cardType = SD.cardType();
-        if (cardType != CARD_NONE) {
-            return true;
-        }
-    }
-    return false;
-}
 
-bool setupBME280()
+//BMP thing
+bool setupBMP390()
 {
     uint8_t slaveAddress = 0x00;
     Wire.beginTransmission(0x76);
@@ -394,16 +403,15 @@ bool setupBME280()
     if (slaveAddress == 0) {
         return false;
     }
-    if (! bme.begin(slaveAddress, &Wire)) {
+    if (!bmp390.begin_I2C(slaveAddress, &Wire)) {
         DBG("Could not find a valid BME280 sensor, check wiring!");
         isBMEOnline = false;
         return false;
     }
-    bme.setSampling(Adafruit_BME280::MODE_NORMAL,
-                    Adafruit_BME280::SAMPLING_X1, // temperature
-                    Adafruit_BME280::SAMPLING_X1, // pressure
-                    Adafruit_BME280::SAMPLING_X1, // humidity
-                    Adafruit_BME280::FILTER_OFF   );
+    bmp390.setTemperatureOversampling(BMP3_OVERSAMPLING_2X);
+  bmp390.setPressureOversampling(BMP3_OVERSAMPLING_2X);
+  bmp390.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
+  bmp390.setOutputDataRate(BMP3_ODR_50_HZ);
     isBMEOnline = true;
     return isBMEOnline;
 }
@@ -453,10 +461,11 @@ void setup()
     //* If GPIO2 has been externally connected to other devices, the automatic detection may not work properly.
     //* Please initialize with the version specified below.
     //* Rev2.1 is not affected by GPIO2 because GPIO2 is not exposed in Rev2.1
-    rslt = twr.begin();
-
+    //HUNTSVILLE
+    //rslt = twr.begin();
+   // rslt = twr.begin(LILYGO_TWR_REV2_1);
     //* If GPIO2 is already connected to other devices, please initialize it with the specified version.
-    //rslt =  twr.begin(LILYGO_TWR_REV2_0);
+    rslt =  twr.begin(LILYGO_TWR_REV2_0);
 
     while (!rslt) {
         DBG("PMU communication failed..");
@@ -482,14 +491,11 @@ void setup()
         //* Or modify it through the menu INFO -> BAND
         radio.setPins(SA868_PTT_PIN, SA868_PD_PIN, SA868_RF_PIN);
 
-        //* Designated as UHF
-        //  rslt = radio.begin(RadioSerial, SA8X8_UHF);
+        
 
         //* Designated as VHF
-        // rslt = radio.begin(RadioSerial, SA8X8_VHF);
+         rslt = radio.begin(RadioSerial, SA8X8_VHF);
 
-        // If BAND is not specified, the default BAND is used, set through the menu.
-        rslt = radio.begin(RadioSerial, SA8X8_UNKNOW);
     }
 
     // If the display does not exist, it will block here
@@ -520,32 +526,10 @@ void setup()
     strip.clear();
     strip.show();
 
-    // Initialize SD card
-    if (setupSDCard()) {
-        uint8_t cardType = SD.cardType();
-        DBG("SD_MMC Card Type: ");
-        if (cardType == CARD_MMC) {
-            DBG("MMC");
-        } else if (cardType == CARD_SD) {
-            DBG("SDSC");
-        } else if (cardType == CARD_SDHC) {
-            DBG("SDHC");
-        } else {
-            DBG("UNKNOWN");
-        }
-#ifdef DEBUG_PORT
-        uint32_t cardSize = SD.cardSize() / (1024 * 1024);
-        uint32_t cardTotal = SD.totalBytes() / (1024 * 1024);
-        uint32_t cardUsed = SD.usedBytes() / (1024 * 1024);
-        DBG("SD Card Size:", cardSize, "MB");
-        DBG("Total space:",  cardTotal, "MB");
-        DBG("Used space:",   cardUsed, "MB");
-#endif
-    }
 
     // Initialize the temperature and pressure sensor.
     // Note that this sensor is an external addition and is not integrated in TWR.
-    setupBME280();
+    setupBMP390();
 
     // Initialize display
     setupOLED(addr);
@@ -583,7 +567,7 @@ void setup()
     // Create a rotary encoder processing task
     xTaskCreate(rotaryTask, "rotary", 10 * 1024, NULL, 10, &rotaryHandler);
 
-}
+} // END OF SETUP
 
 
 void loop()
@@ -591,7 +575,7 @@ void loop()
     static uint8_t menuSelect     = 0;
     static uint8_t prevMenuSelect = menuSelect;
     Button btnPressed;
-
+    
     inMenu = true;
     do {
         btnPressed = readButton();
@@ -773,7 +757,7 @@ void printMain()
             u8g2.drawGlyph(start_pos, 12, 0xe04C);
         }
 
-        if (twr.isReceiving) {
+        if (twr.isReceiving) { 
             u8g2.drawGlyph(start_pos, 12, 0xe275);
             if (!showStrip) {
                 strip.setPixelColor(0, strip.Color(0, 255, 0));
@@ -787,6 +771,7 @@ void printMain()
                 strip.show();
             }
         }
+        
 
         int volume = radio.getVolume();
         for (int i = 0; i < volume; ++i) {
@@ -851,167 +836,8 @@ void printMenu( uint8_t menuSelect )
     } while ( u8g2.nextPage() );
 }
 
-void demoLed( uint8_t menuSelect )
-{
-    int prevValue = 0;
-    int value = strip.getBrightness();
-    Button btnPressed;
-    strip.setPixelColor(0, strip.Color(255, 0, 0));
-    strip.show();
 
-    do {
-        value   = readRotary(value, 0, 250, 10);
-        btnPressed = readButton();
-        if (prevValue != value) {
-            beep();
-            strip.setBrightness(value);
-            if (prevValue == 0) {
-                strip.setPixelColor(0, strip.Color(255, 0, 0));
-            }
-            strip.show();
-            prevValue  = value;
-        }
-        u8g2.firstPage();
-        do {
-            drawFrame();
-            drawHeader(menuSelect);
-
-            u8g2.drawFrame(13, 30, 102, 12);
-            u8g2.drawFrame(14, 31, 100, 10);
-
-            uint32_t bar = map(value, 0, 255, 0, 100);
-            for ( int x = 0 ; x < bar ; x++ ) {
-                u8g2.drawVLine(15 + x, 32, 8);
-            }
-
-            u8g2.setFont(u8g2_font_nokiafc22_tu);
-            u8g2.setCursor(14, 51);
-            u8g2.print(F("BRIGHTNESS:"));
-
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(bar).c_str()) - 14, 51 );
-            u8g2.print(value);
-        } while ( u8g2.nextPage() );
-
-    } while ( btnPressed != LongPress );
-
-
-    SAVE_CONFIGURE(pixelBrightness, value);
-
-    strip.clear();
-    strip.show();
-}
-
-void demoSpeaker( uint8_t menuSelect )
-{
-    Button   btnPressed;
-    uint32_t prevTime   = 0;
-    int value = 600;
-
-    if (!twr.isEnableBeep()) {
-        twr.routingSpeakerChannel(TWRClass::TWR_ESP_TO_SPK);
-    }
-
-    do {
-        value   = readRotary(value, 100, 3000, 100);
-        btnPressed = readButton();
-
-        u8g2.firstPage();
-        do {
-            drawFrame();
-            drawHeader(menuSelect);
-
-            u8g2.drawFrame(13, 30, 102, 12);
-            u8g2.drawFrame(14, 31, 100, 10);
-
-            uint32_t bar = map(value, 100, 3000, 0, 100);
-            for ( int x = 0 ; x < bar ; x++ ) {
-                u8g2.drawVLine(15 + x, 32, 8);
-            }
-
-            u8g2.setFont(u8g2_font_nokiafc22_tu);
-            u8g2.setCursor(14, 51);
-            u8g2.print(F("FREQ:"));
-
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(bar).c_str()) - 35, 51 );
-            u8g2.print(value); u8g2.print("HZ");
-
-        } while ( u8g2.nextPage() );
-
-        if (millis() > prevTime) {
-            tone(ESP32_PWM_TONE, value, 100);
-            prevTime = millis() + 300;
-        }
-
-    } while (btnPressed != LongPress);
-
-    if (!twr.isEnableBeep()) {
-        twr.routingSpeakerChannel(TWRClass::TWR_RADIO_TO_SPK);
-    }
-}
-
-void demoOled( uint8_t menuSelect )
-{
-    int prevValue = 0;
-    int value = twr.pdat.dispBrightness;
-    Button btnPressed;
-    do {
-
-        value   = readRotary(value, 0, 250, 10);
-        btnPressed = readButton();
-        if (prevValue != value) {
-            prevValue  = value;
-            beep();
-            u8g2.setContrast(value);
-        }
-
-        u8g2.firstPage();
-        do {
-            drawFrame();
-            drawHeader(menuSelect);
-            u8g2.drawFrame(13, 30, 102, 12);
-            u8g2.drawFrame(14, 31, 100, 10);
-            uint32_t bar = map(value, 0, 250, 0, 100);
-            for ( int x = 0 ; x < bar ; x++ ) {
-                u8g2.drawVLine(15 + x, 32, 8);
-            }
-            u8g2.setFont(u8g2_font_nokiafc22_tu);
-            u8g2.setCursor(14, 51);
-            u8g2.print(F("BRIGHTNESS:"));
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(bar).c_str()) - 14, 51 );
-            u8g2.print(value);
-        } while (u8g2.nextPage());
-    } while ( btnPressed != LongPress );
-
-    SAVE_CONFIGURE(dispBrightness, value);
-}
-
-void demoButton( uint8_t menuSelect )
-{
-    static uint32_t  pressedCounter = 0;
-    Button           btnPressed;
-    do {
-        btnPressed = readButton();
-        if ( btnPressed == ShortPress) {
-            pressedCounter++;
-            beep();
-        }
-        u8g2.firstPage();
-        do {
-            drawFrame();
-            drawHeader(menuSelect);
-
-            u8g2.setFont(u8g2_font_nokiafc22_tu);
-            u8g2.setCursor(14, 43);
-            u8g2.print(F("CLICKS:"));
-
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(pressedCounter).c_str()) - 14, 43 );
-            u8g2.print(pressedCounter);
-        } while ( u8g2.nextPage() );
-
-    } while ( btnPressed != LongPress );
-}
-
-void demoAlarm(uint8_t menuSelect )
+void demoMic(uint8_t menuSelect )
 {
     Button   btnPressed;
     uint32_t prevTime   = 0;
@@ -1063,92 +889,271 @@ void demoAlarm(uint8_t menuSelect )
     strip.show();
 }
 
-void demoMic( uint8_t menuSelect )
-{
-    Button     btnPressed;
-    int8_t dataIn[128], dataOut[128];
 
-
-    if (twr.getVersion() == TWRClass::TWR_REV2V0) {
-        drawError(menuSelect); return;
-    }
-
-    twr.routingMicrophoneChannel(TWRClass::TWR_MIC_TO_ESP);
-
-
-    do {
-        btnPressed = readButton();
-        u8g2.firstPage();
-        do {
-            drawFrame();
-            drawHeader(menuSelect);
-
-
-            for (int i = 0; i < 128; i++) {                     //take 128 samples
-                int val = analogRead(ESP_MIC_ADC);              //get samples from GPIO15
-                dataOut[i] = val / 4 - 128;                     //each element of array is val/4-128
-                dataIn[i] = 0;
-            };
-            char x = 0, ylim = 60;
-            fix_fft(dataOut, dataIn, 7, 0);                                    //perform the FFT on dataOut
-            for (int i = 1; i < 64; i++) {                              // In the current design, 60Hz and noise
-                int dat = sqrt(dataOut[i] * dataOut[i] + dataIn[i] * dataIn[i]);      //filter out noise and hum
-                u8g2.drawLine(i * 2 + x, ylim, i * 2 + x, ylim - dat);  // draw bar graphics for freqs above 500Hz to buffer
-            };
-
-        } while ( u8g2.nextPage() );
-    } while ( btnPressed != LongPress );
-
-    twr.routingMicrophoneChannel(TWRClass::TWR_MIC_TO_RADIO);
-}
-
-void demoSensor( uint8_t menuSelect )
-{
-    float    humid = 0;
-    float    pressure = 0;
-    float    temperature = 0;
+void demoVelocitySensor(uint8_t menuSelect) {   
     uint32_t intervalue = 0;
-    Button   btnPressed;
+    Button btnPressed;
+    sensors_event_t event;
+    float previousAltitude = 0.0;
+    float currentAltitude = 0.0;
+    float velocity = 0.0;  // Vertical velocity in m/s
+    unsigned long previousTime = 0;  // To track the time difference
+    float maxVelocity = 0.0;
+    float altitude = 0;
+    float pressure = 0;
+    float maxPressure = 0;
+
+   
     do {
+        // Read the acceleration data every second
         if (isBMEOnline && millis() > intervalue) {
-            humid          = bme.readHumidity() ;
-            temperature    = bme.readTemperature() ;
-            pressure       = (bme.readPressure() / 100.0F) ;
+            pressure = (bmp390.pressure / 100.0);
+            
+            currentAltitude = bmp390.readAltitude(1024.30);
+
+            unsigned long currentTime = millis();
+            float deltaTime = (currentTime - previousTime) / 1000.0;
+
+            if(deltaTime > 0){
+                float deltaAltitude = currentAltitude - previousAltitude;
+                velocity = deltaAltitude / deltaTime;
+            }
+
+            if(velocity > maxVelocity){
+                maxVelocity = velocity;
+            }
+
+            previousAltitude = currentAltitude;
+            previousTime = currentTime;
             intervalue = millis() + 1000;
         }
+
+        // Read button press
         btnPressed = readButton();
 
+        // Display the data
         u8g2.firstPage();
         do {
             drawFrame();
             drawHeader(menuSelect);
 
+            // Display acceleration (Z-axis)
             u8g2.setFont(u8g2_font_nokiafc22_tu);
-
             u8g2.setCursor(14, 31);
-            u8g2.print(F("HUMIDITY:"));
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(humid, 2).c_str()) - 22, 31 );
-            u8g2.print(humid, 2);
+            u8g2.print(F("Z Velo:"));
+            u8g2.setCursor(U8G2_HOR_ALIGN_RIGHT(String(velocity, 2).c_str()) - 22, 31);
+            u8g2.print(velocity, 2);
             u8g2.setCursor(109, 31);
-            u8g2.print(F("%"));
+            u8g2.print(F("m/s")); 
 
             u8g2.setCursor(14, 44);
-            u8g2.print(F("PRESSURE:"));
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(pressure, 2).c_str()) - 22, 44 );
-            u8g2.print(pressure, 2);
+            u8g2.print(F("Max Velo:"));
+            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(maxVelocity, 2).c_str()) - 22, 44 );
+            u8g2.print(maxVelocity, 2);
             u8g2.setCursor(109, 44);
-            u8g2.print(F("HPA"));
+            u8g2.print(F("m/s"));
 
             u8g2.setCursor(14, 57);
-            u8g2.print(F("TEMP:"));
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(temperature, 2).c_str()) - 22, 57 );
-            u8g2.print(temperature, 2);
+            u8g2.print(F(/*"TEMP:"*/"ALT:"));
+            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(/*temperature*/pressure, 5).c_str()) - 22, 57 );
+            u8g2.print(/*temperature*/pressure, 5);
             u8g2.setCursor(109, 57);
-            u8g2.print(F("C"));
-        } while ( u8g2.nextPage() );
+            u8g2.print(F("M"));
+ 
+        } while (u8g2.nextPage());
 
-    } while ( btnPressed != LongPress );
+    } while (btnPressed != LongPress);
 }
+
+
+void demoFlightTelemetry(uint8_t menuSelect) {
+    float altitude = 0;
+    float pressure = 0;
+    float temperature = 0;
+    float maxAltitude = 0;
+    float currentAltitude;
+    float maxVelocity = 0;
+    float previousAltitude = 0.0;
+    float velocity = 0.0;        // Vertical velocity in m/s
+    float voltageBattery; // Placeholder for battery percentage
+    float survivePercentage = 100.0;
+    int timeHour,timeMinutes,landingH,landingM;
+    bool  altFlag, veloFlag, batFlag = false;
+    uint32_t intervalue = 0;
+    float previousTime = 0;
+    bool landed = false;
+    
+    Button btnPressed;
+
+    do {
+        if (isBMEOnline && millis() > intervalue) {
+            
+            //For GPS data
+            while (GPSSerial.available()){
+                gps.encode(GPSSerial.read());
+            }
+            
+            // Read sensor data
+            temperature = bmp390.temperature;
+
+            //GPS Time for TOL
+            timeHour = gps.time.hour() + 10;
+            timeMinutes = gps.time.minute();
+
+            if(twr.isReceiving){
+                strip.setPixelColor(0, strip.Color(0, 255, 0));
+                    strip.show();
+                    counter ++;
+                
+            }
+            if(counter > 10){
+                counter = 0;
+                strip.clear();
+                strip.show();
+            }
+            voltageBattery  = twr.getBatteryPercent();
+            pressure = (bmp390.pressure / 100.0);
+            altitude = bmp390.readAltitude(1030.0);
+
+            currentAltitude = bmp390.readAltitude(1030.0); 
+
+            
+            float currentTime = millis();
+            float deltaTime = (currentTime - previousTime) / 1000.0;
+
+            if(deltaTime > 0.0f){
+                float deltaAltitude = currentAltitude - previousAltitude;
+                velocity = deltaAltitude / deltaTime;
+            } 
+
+            previousAltitude = currentAltitude;
+            previousTime = currentTime;
+
+            //For max Altitude
+            if (altitude > maxAltitude) {
+                maxAltitude = altitude;
+            }
+
+            //For max velocity ERROR at start
+            if(velocity > 3000 || isinf(velocity)){
+                velocity = 0;
+            }
+
+            if(velocity > maxVelocity){
+                maxVelocity = velocity;
+            }
+
+            //For landing time
+            // Landing is inferred from sustained radio idle time (counter),
+            // not a direct altitude/velocity check -- see notes above.
+            if (counter > 2) {
+                landed = true;
+                landingH = timeHour;
+                landingM = timeMinutes;
+            } else if(counter < 1){
+                landed = false;
+            }
+            DBG(counter);
+            //For Survivability
+            if(altitude > 1410 && !altFlag){
+            survivePercentage -= 10.0;
+            altFlag = true;
+            }
+            if(velocity < -7.2 || velocity > 183.0 && !veloFlag ){
+            survivePercentage -= 25.0;
+            veloFlag = true;
+            }
+            if(voltageBattery < 75 && !batFlag){
+            survivePercentage = survivePercentage - 30.0;
+            batFlag = true;
+            }
+            
+        
+
+        intervalue = millis() + 500;
+    
+        }
+
+        // Check for button press
+        btnPressed = readButton();
+
+        // Display data on screen
+        u8g2.firstPage();
+        do {
+            drawFrame();
+            drawHeader(menuSelect);
+
+            u8g2.setFont(u8g2_font_5x7_tf);
+
+            // Row 1: Max Velocity
+            u8g2.setCursor(2, 28);
+            u8g2.print(F("MAXV:"));
+            u8g2.setCursor(27,28);
+            u8g2.print(maxVelocity, 2);
+            u8g2.setCursor(60, 28);
+            u8g2.print(F("m/s"));
+
+            // Row 2: Max Altitude
+            u8g2.setCursor(2, 40);
+            u8g2.print(F("MALT:"));
+            u8g2.setCursor(27,40);
+            u8g2.print(maxAltitude, 2);
+            u8g2.setCursor(65, 40);
+            u8g2.print(F("m"));
+
+            // Row 3: Temperature
+            u8g2.setCursor(2, 52);
+            u8g2.print(F("TEMP:"));
+            u8g2.setCursor(27, 52);
+            u8g2.print(temperature, 2);
+            u8g2.setCursor(54, 52);
+            u8g2.print(F("C"));
+            
+            //Row 3: Survivability (Next to Temp)
+            u8g2.setCursor(75, 52);
+            u8g2.print(F("SOC:"));
+            u8g2.setCursor(95, 52);
+            u8g2.print(survivePercentage, 1);
+            u8g2.setCursor(120, 52);
+            u8g2.print(F("%")); 
+
+            // Row 4: Battery
+            u8g2.setCursor(2, 62);
+            u8g2.print(F("BAT:"));
+            u8g2.setCursor(21, 62);
+            u8g2.print(voltageBattery, 1);
+            u8g2.setCursor(50, 62);
+            u8g2.print(F("%"));
+
+            // Row 4: Time of Landing (Next to Battery)
+            u8g2.setCursor(65, 62);
+            u8g2.print(F("TOL:"));
+            if(landed){
+            u8g2.setCursor(85, 62); 
+            u8g2.printf("%d:",-landingH);
+            u8g2.setCursor(100, 62); 
+            if(gps.time.minute() < 10) u8g2.print("0");
+            u8g2.print(landingM);
+              if(gps.time.hour() > 10){
+                    u8g2.setCursor(110,62);
+                    u8g2.print("AM");
+                } else{
+                    u8g2.setCursor(110,62);
+                    u8g2.print("PM");
+                }
+    
+            } else{
+                u8g2.setCursor(90,62);
+                u8g2.print(F("N/A"));
+            }
+            
+            
+        } while (u8g2.nextPage());
+
+    } while (btnPressed != LongPress);
+}
+
+
 
 void demoGPS(uint8_t menuSelect)
 {
@@ -1216,7 +1221,7 @@ void demoGPS(uint8_t menuSelect)
 
             u8g2.setCursor(14, 44);
             u8g2.print(F("LATITUDE:"));
-            String lat = gps.location.isValid() ? String(gps.location.lat(), 5).c_str() : "N/A";
+            String lat = gps.location.isValid() ? String(gps.location.lat(), 3).c_str() : "N/A";
             u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(lat.c_str()) - offset, 44 );
             u8g2.print(lat);
 
@@ -1236,64 +1241,6 @@ void demoGPS(uint8_t menuSelect)
     strip.show();
 }
 
-void demoSDCard(uint8_t menuSelect)
-{
-    Button   btnPressed;
-    uint32_t cardSize = 0;
-    uint32_t cardTotal = 0;
-    uint32_t cardUsed = 0;
-    uint32_t intervalue = 0;
-
-    do {
-        btnPressed = readButton();
-        u8g2.firstPage();
-        do {
-
-            if (SD.cardType() == CARD_NONE) {
-                if (millis() > intervalue) {
-                    if (!setupSDCard()) {
-                        cardSize = 0;
-                        cardTotal = 0;
-                        cardUsed = 0;
-                    }
-                    intervalue = millis() + 8000UL;
-                }
-            }
-            if (SD.cardType() != CARD_NONE && cardSize == 0) {
-                cardSize  = SD.cardSize() / (1024 * 1024);
-                cardTotal = SD.totalBytes() / (1024 * 1024);
-                cardUsed  = SD.usedBytes() / (1024 * 1024);
-            }
-
-            drawFrame();
-            drawHeader(menuSelect);
-
-            u8g2.setFont(u8g2_font_nokiafc22_tu);
-
-            u8g2.setCursor(14, 31);
-            u8g2.print(F("SIZE:"));
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(cardSize).c_str()) - 22, 31 );
-            u8g2.print(cardSize);
-            u8g2.setCursor(109, 31);
-            u8g2.print(F("MB"));
-
-            u8g2.setCursor(14, 44);
-            u8g2.print(F("TOTAL:"));
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(cardTotal).c_str()) - 22, 44 );
-            u8g2.print(cardTotal);
-            u8g2.setCursor(109, 44);
-            u8g2.print(F("MB"));
-
-            u8g2.setCursor(14, 57);
-            u8g2.print(F("USED:"));
-            u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(cardUsed).c_str()) - 22, 57 );
-            u8g2.print(cardUsed);
-            u8g2.setCursor(109, 57);
-            u8g2.print(F("MB"));
-        } while ( u8g2.nextPage() );
-
-    } while ( btnPressed != LongPress );
-}
 
 void demoPMU(uint8_t menuSelect)
 {
@@ -1304,7 +1251,7 @@ void demoPMU(uint8_t menuSelect)
 
     do {
         voltageUSB      = twr.getVbusVoltage() / 1000.0;
-        voltageBattery  = twr.getBattVoltage() / 1000.0;
+        voltageBattery  = twr.getBatteryPercent();
         tempPMU         = twr.getTemperature();
         btnPressed      = readButton();
 
@@ -1327,7 +1274,7 @@ void demoPMU(uint8_t menuSelect)
             u8g2.setCursor( U8G2_HOR_ALIGN_RIGHT(String(voltageBattery).c_str()) - 22, 44 );
             u8g2.print(voltageBattery);
             u8g2.setCursor(109, 44);
-            u8g2.print(F("V"));
+            u8g2.print(F("%"));
 
             u8g2.setCursor(14, 57);
             u8g2.print(F("TEMP. PMU:"));
@@ -1430,7 +1377,9 @@ void setTransFreq(uint8_t menuSelect, bool tx)
     uint32_t maxOut = radio.getStetting().maxFreq;
     uint32_t transFreq = tx ? radio.getStetting().transFreq : radio.getStetting().recvFreq;
     uint32_t bandwidth = radio.getStetting().bandwidth ;
-    uint32_t CXCSS = tx ? radio.getStetting().txCXCSS : radio.getStetting().rxCXCSS;
+    uint32_t CXCSS = tx ? radio.getStetting().txCXCSS : 
+    radio.getStetting().rxCXCSS;
+    DBG(CXCSS);
 
     do {
         btnPressed = readButton();
@@ -1531,7 +1480,9 @@ void setTransFreq(uint8_t menuSelect, bool tx)
             }
             transFreq = tx ? radio.getStetting().transFreq : radio.getStetting().recvFreq;
             bandwidth = radio.getStetting().bandwidth ;
-            CXCSS = tx ? radio.getStetting().txCXCSS : radio.getStetting().rxCXCSS;
+            CXCSS = tx ? radio.getStetting().txCXCSS : 
+            radio.getStetting().rxCXCSS;
+            DBG(CXCSS);
         }
 
     } while ( btnPressed != LongPress );
@@ -1741,193 +1692,324 @@ void demoFilter(uint8_t menuSelect)
 
     radio.saveConfigure();
 }
-
-void demoBLE(uint8_t menuSelect)
+ void broadcastAudioTelemetry(uint8_t menuSelect)
 {
+    if(!SD.begin(SD_CS, SPI, 4000000, "/sd" , 20)){
+            DBG("SD BAD");
+    }
     Button btnPressed;
-    int prevValue = 0;
-    int value = BLE::isRunning();
+    int value = 0; // 0 for Stop, 1 for Play
+    bool isPlaying = false;
+    bool rslt = false;
+   // bool landed = radio.isReceive(); DELETE AND REPLACE WITH twr.isReceiving
+
+    int firstVal = 0;
+    int secondVal = 0;
+    int divVal = 0;
+    int altitude = 0;
+    int pressure = 0;
+    int temperature = 0;
+    int maxAltitude = 0;
+    int currentAltitude;
+    int maxVelocity = 0;
+    int previousAltitude = 0.0;
+    int velocity = 0.0;        // Vertical velocity in m/s
+    int voltageBattery; // Placeholder for battery percentage
+    int survivePercentage = 100.0;
+    int timeHour,timeMinutes,landingH,landingM;
+    bool  altFlag, veloFlag, batFlag = false;
+    uint32_t intervalue = 0;
+    float previousTime = 0;
+    bool landed = false;
+    
+    radio.setTxFreq(169420000UL); //147500000UL                 //PRACTICE TRANSMISSION: 146500000UL
+    radio.setRxFreq(147500000UL); //169420000UL
+    radio.setTxCXCSS(0);
+    radio.setRxCXCSS(0);
+    radio.setBandWidth(12500000/1000);
+
+    // Just debugging to see the values doesn't effect anything
+    DBG(radio.getStetting().transFreq);
+    DBG(radio.getStetting().recvFreq);
+    DBG(radio.getStetting().bandwidth);
+    DBG(radio.getStetting().txCXCSS);
+    DBG(radio.getStetting().rxCXCSS);
+    DBG(radio.getStetting().type);
+
+
+    //TEST VARIABLES
+    bool cool = true;
+    int reset = 3;
     do {
-        value           = readRotary(value, 0, 1);
-        btnPressed      = readButton();
-        u8g2.firstPage();
-        do {
-            drawFrame();
-            drawHeader(menuSelect);
-            if (prevValue != value) {
-                prevValue = value;
-                beep();
+        
+        
+        if (cool == true) {
+            
+            //For GPS data
+            while (GPSSerial.available()){
+                gps.encode(GPSSerial.read());
             }
-            u8g2.setFont(u8g2_font_nokiafc22_tu);
-
-            u8g2.setCursor(14, 31);
-            u8g2.print("NAME:");
-            if (BLE::isRunning()) {
-                u8g2.print(BLE::getDevName());
-            } else {
-                u8g2.print("N/A:");
-            }
-
-            u8g2.setCursor(14, 44);
-            u8g2.print(F("[   ]  OFF"));
-            u8g2.setCursor(14, 57);
-            u8g2.print(F("[   ]  ON"));
-            u8g2.setCursor(19, 44);
-            u8g2.print(value == 0 ? F("*") : F(" "));
-            u8g2.setCursor(19, 57);
-            u8g2.print(value == 1 ? F("*") : F(" "));
-
-        } while ( u8g2.nextPage() );
-
-        if (btnPressed == ShortPress) {
-            beep();
-            if (value) {
-                BLE::enableBLE();
-            } else {
-                BLE::disableBLE();
-            }
-            value = BLE::isRunning();
-        }
-    } while ( btnPressed != LongPress );
-    SAVE_CONFIGURE(ble, value);
-}
-
-void demoWiFi(uint8_t menuSelect)
-{
-    Button btnPressed;
-    int prevValue = 0;
-    int value = WiFi.getMode() != WIFI_MODE_NULL;
-    do {
-        value           = readRotary(value, 0, 1);
-        btnPressed      = readButton();
-        u8g2.firstPage();
-        do {
-            drawFrame();
-            drawHeader(menuSelect);
-            if (prevValue != value) {
-                prevValue = value;
-                beep();
-            }
-            u8g2.setFont(u8g2_font_nokiafc22_tu);
-
-            u8g2.setCursor(14, 31);
-            u8g2.print("HOSTNAME:");
-            if (WiFi.getMode() == WIFI_MODE_AP) {
-                u8g2.print(WiFi.softAPgetHostname());
-            } else {
-                u8g2.print("N/A:");
-            }
-
-            u8g2.setCursor(14, 44);
-            u8g2.print(F("[   ]  OFF"));
-            u8g2.setCursor(14, 57);
-            u8g2.print(F("[   ]  ON"));
-            u8g2.setCursor(19, 44);
-            u8g2.print(value == 0 ? F("*") : F(" "));
-            u8g2.setCursor(19, 57);
-            u8g2.print(value == 1 ? F("*") : F(" "));
-
-        } while ( u8g2.nextPage() );
-
-        if (btnPressed == ShortPress) {
-            beep();
-
-            if (value) {
-                if (WiFi.getMode() != WIFI_MODE_AP) {
-                    if (!WiFi.softAP(ssid, password)) {
-                        log_e("Soft AP creation failed.");
-                        return;
+            // Read sensor data
+            temperature = bmp390.temperature;
+            
+            //GPS Time for TOL
+            timeHour = gps.time.hour() - 5;
+            timeMinutes = gps.time.minute();
+            
+            if(twr.isReceiving){
+                strip.setPixelColor(0, strip.Color(0, 0, 255));
+                    strip.show();
+                    counter = counter + 1;
+                    delay(500);
+                    if(counter > 10){
+                    strip.clear();
+                    strip.show();
                     }
-                    WiFi.softAPsetHostname("T-TWR");
-                    IPAddress myIP = WiFi.softAPIP();
-                    DBG("AP IP address: ");
-                    DBG(myIP);
-                    DBG("Server started");
-                    setupWeb();
-                }
-            } else {
-                if (WiFi.getMode() == WIFI_MODE_AP) {
-                    endWeb();
-                    WiFi.enableAP(false);
-                }
+                
             }
-            value = WiFi.getMode() == WIFI_MODE_AP;
+            if(counter > 15){
+                counter = 0;
+            }
+            
+            
+            voltageBattery  = twr.getBatteryPercent();
+            pressure = (bmp390.pressure / 100);
+            altitude = bmp390.readAltitude(1011.0);
+
+            currentAltitude = bmp390.readAltitude(1011.0);
+
+            float currentTime = millis();
+            float deltaTime = (currentTime - previousTime) / 1000.0;
+
+            if(deltaTime > 0.0f){
+                float deltaAltitude = currentAltitude - previousAltitude;
+                velocity = deltaAltitude / deltaTime;
+            }
+
+            previousAltitude = currentAltitude;
+            previousTime = currentTime;
+
+            //For max Altitude
+            if (altitude > maxAltitude) {
+                maxAltitude = altitude;
+            }
+
+            //For max velocity ERROR at start
+            if(velocity > 3000 || isinf(velocity)){
+                velocity = 0;
+            }
+
+            if(velocity > maxVelocity){
+                maxVelocity = velocity;
+            }
+
+             //For landing time
+            if (counter > 6) {
+                landed = true;
+                landingH = timeHour;
+                landingM = timeMinutes;
+                if(landingH < 0){
+                    landingH = -landingH;
+                }
+            } else if(counter < 6){
+                landed = false;
+            }
+            
+            //For Survivability
+            if(altitude > 1625 && !altFlag){
+            survivePercentage -= 5.0;
+            altFlag = true;
+            }
+            if(velocity < -10.0 || velocity > 200 && !veloFlag ){
+            survivePercentage -= 20.0;
+            veloFlag = true;
+            }
+            if(voltageBattery < 75 && !batFlag){
+            survivePercentage = survivePercentage - 30.0;
+            batFlag = true;
+            }
+            
+        
+
+        intervalue = millis() + 500;
+        
+    
         }
+        //value = readRotary(value, 0, 1); // Navigate between Stop and Play
+        if(counter < 0){
+        btnPressed = readButton();
+        }
+        u8g2.firstPage();
+        do {
+            drawFrame();
+            drawHeader(menuSelect);
 
-    } while ( btnPressed != LongPress );
+            u8g2.setFont(u8g2_font_nokiafc22_tu);
+            u8g2.setCursor(14, 31);
+            u8g2.print("WAV Player");
 
-    SAVE_CONFIGURE(wifi, value);
-}
+            u8g2.setCursor(14, 44);
+            u8g2.print(F("[   ]  Stop"));
+            u8g2.setCursor(14, 57);
+            u8g2.print(F("[   ]  Play"));
 
-void demoSetting(uint8_t menuSelect)
-{
-    Button btnPressed;
-    int value = 0;
-    int prevValue = 0;
-    bool  beep = twr.getSetting().beep;
+            u8g2.setCursor(75, 52);
+            u8g2.print(F("C#"));
+            u8g2.setCursor(95, 52);
+            u8g2.print(counter);
 
-    if (twr.getVersion() == TWRClass::TWR_REV2V0) {
-        drawError(menuSelect); return;
+        } while (u8g2.nextPage());
+
+        if (counter > 3) {
+            switch(counter){
+            
+            case 11: 
+                    isPlaying = false;
+                    rslt = false;
+                    radio.receive();
+                    twr.routingSpeakerChannel(TWRClass::TWR_RADIO_TO_SPK);
+                    DBG("Done .");
+                    //file->close();
+                    strip.setPixelColor(0, strip.Color(255, 0, 0));
+                    strip.show();
+                    strip.clear();
+                    strip.show();
+                    break;
+            case 9:
+                    strip.setPixelColor(0, strip.Color(0, 0, 255));
+                    strip.show();
+                    strip.clear();
+                    strip.show();
+                    isPlaying = true;
+                    DBG("Case 1 Selected");
+                    
+                 //twr.enableRadio(); I dont think this does anything
+
+                // Route the ESP32 PDM PIN to the power amplifier
+                twr.routingSpeakerChannel(TWRClass::TWR_ESP_TO_SPK);
+
+
+                DBG("Initialize Audio");
+
+            wav  = new AudioGeneratorWAV();
+            file = new AudioFileSourceSD();
+            out  = new AudioOutputI2S(0, AudioOutputI2S::INTERNAL_PDM);
+
+            radio.setPins(SA868_PTT_PIN, SA868_PD_PIN);
+            rslt = radio.begin(RadioSerial, twr.getBandDefinition());
+
+            out->SetPinout(I2S_PIN_NO_CHANGE, I2S_PIN_NO_CHANGE, ESP32_PWM_TONE, I2S_PIN_NO_CHANGE);
+
+            out->SetOutputModeMono(true);
+
+            out->SetGain(.8);
+            
+            if(landed && reset != 0){
+            radio.transmit();
+            delay(1000);
+
+            playWavFile(WAV_CALLSIGN);
+            playWavFile(WAV_TEMP);
+            playVariableDigits(temperature);  // Play temperature digits
+            playWavFile(WAV_DEG);
+            playWavFile(WAV_ALT);
+            playVariableDigits(maxAltitude);  // Play altitude digits
+            playWavFile(WAV_MET);
+            playWavFile(WAV_MAXVELO);
+            playVariableDigits(maxVelocity);  // Play velocity digits
+            playWavFile(WAV_MPS);
+            playWavFile(WAV_BATPERC);
+            playVariableDigits(voltageBattery);  // Play battery digits
+            playWavFile(WAV_ALIPERC);
+            playWavFile(WAV_CREW);
+            playVariableDigits(survivePercentage);  // Play SOC digits
+            playWavFile(WAV_ALEXPERC);
+            playWavFile(WAV_TOL); // Time of landing
+            playVariableDigits(landingH);  // Play TOL digits
+            playVariableDigits(landingM);
+            playWavFile(WAV_CALLSIGN);
+            
+           
+            radio.receive(); 
+            delay(2000);
+            --reset;
+                    break;
+            } else {
+                counter = -2;
+                reset = 1;
+                break;
+            }
+            radio.saveConfigure();
+        }
+         
+     } 
+
+    } while (btnPressed != LongPress);
+    
+}  
+
+// NEW FUNC
+void playWavFile(const char* fileName){
+bool rslt = false;
+
+file->open(fileName);
+rslt = wav->begin(file, out);
+if (!rslt) {
+        DBG("wav begin failed.");
+        return;
     }
 
-    do {
-        value       = readRotary(0, 0, 2);
-        btnPressed  = readButton();
+    twr.routingMicrophoneChannel(TWRClass:: TWR_MIC_TO_RADIO);
 
-        u8g2.firstPage();
-        do {
-            drawFrame();
-            drawHeader(menuSelect);
-
-            if (prevValue != value) {
-                prevValue = value;
-            }
-            u8g2.setFont(u8g2_font_nokiafc22_tu);
-
-            u8g2.setCursor(14, 31);
-            if (beep) {
-                u8g2.print(F("   *    ")) ;
-            } else {
-                u8g2.print(F("   -    ")) ;
-            }
-            u8g2.setCursor(45, 31);
-            u8g2.print(F("BEEP")) ;
-            switch (value) {
-            case 0:
-                u8g2.setCursor(14, 31);
-                if (beep) {
-                    u8g2.print(F("[  *  ]")) ;
-                } else {
-                    u8g2.print(F("[  -  ]")) ;
-                }
-                break;
-            default:
-                break;
-            }
-
-            if (btnPressed == ShortPress) {
-                switch (value) {
-                case 0:
-                    twr.enableBeep(!beep);
-                    beep = twr.getSetting().beep;
-                    if (twr.isEnableBeep()) {
-                        twr.routingSpeakerChannel(TWRClass::TWR_ESP_TO_SPK);
-                    } else {
-                        twr.routingSpeakerChannel(TWRClass::TWR_RADIO_TO_SPK);
-                    }
-                    break;
-                default:
-                    break;
-                }
-            }
-
-        } while ( u8g2.nextPage() );
-
-    } while ( btnPressed != LongPress );
-    SAVE_CONFIGURE(beep, beep);
+    while(1) {
+        strip.setPixelColor(0, strip.Color(0, 255, 0));
+        strip.show();
+        
+        // Start microphone routing (if required)
+         
+        
+        if (!wav->loop()) {
+            wav->stop();
+            file->close();
+            strip.clear();
+            strip.show();
+            break;
+        }
+    }
 
 }
 
+void playVariableDigits(int variable) {
+    if (variable == 0) {
+        playDigitWAV(0);  // Special case for zero
+        return;
+    }
+
+    // Convert the number to a string to preserve its exact format
+    std::string str = std::to_string(variable);
+
+    // Play each digit in reversed order
+    for (char digitChar : str) {
+        int digit = digitChar - '0';  // Convert the character to an integer
+        playDigitWAV(digit);          // Play the corresponding WAV file
+    }
+}
+
+
+void playDigitWAV(int digit) {
+    const char* wavFiles[] = {
+        "/NUMBERS/ZERO.wav", "/NUMBERS/ONE.wav", "/NUMBERS/TWO.wav", "/NUMBERS/THREE.wav",
+        "/NUMBERS/FOUR.wav", "/NUMBERS/FIVE.wav", "/NUMBERS/SIX.wav", "/NUMBERS/SEVEN.wav",
+        "/NUMBERS/EIGHT.wav", "/NUMBERS/NINE.wav"
+    };
+
+    if (digit >= 0 && digit <= 9) {
+        playWavFile(wavFiles[digit]);
+    }
+}
+
+
+//
 void demoDevInfo(uint8_t menuSelect)
 {
     Button btnPressed;
@@ -2057,7 +2139,7 @@ void drawHeader( uint8_t menuSelect )
 void beep()
 {
     if (twr.isEnableBeep()) {
-        tone(ESP32_PWM_TONE, 800, 5);
+        tone(45, 800, 1000);
     }
 }
 
